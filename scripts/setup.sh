@@ -100,14 +100,17 @@ extract_release() {
 
 # Setup Docker containers
 setup_docker() {
-    local docker_compose_file="$1"
-    log_message "info" "Starting Docker containers..."
-    docker compose --file "$docker_compose_file" up --force-recreate -d || {
+    local compose_file="$1"
+    local env_file="$2"
+
+    log_message "info" "Starting Docker containers using $compose_file..."
+    docker compose --file "$compose_file" --env-file "$env_file" up --force-recreate -d || {
         log_message "danger" "Docker setup failed."
         exit 1
     }
     log_message "success" "Docker containers are running."
 }
+
 
 generate_certificates() {
     local ip="$1"
@@ -174,12 +177,22 @@ EOF
 
 
 
+
+# Main setup logic
 # Main setup logic
 main() {
+    log_message "info" "Starting TAK server setup..."
+
+    # Step 1: Verify dependencies
     verify_dependencies
+
+    # Step 2: Check required ports
     check_ports
+
+    # Step 3: Cleanup existing setup
     cleanup_setup
 
+    # Step 4: Locate the release file
     log_message "info" "Looking for release file..."
     local release_file
     release_file=$(ls *-RELEASE-*.zip 2>/dev/null | head -n 1)
@@ -188,22 +201,29 @@ main() {
         exit 1
     fi
 
+    # Step 5: Verify checksums of the release file
     verify_checksums
+
+    # Step 6: Extract the release file
     extract_release "$release_file"
 
+    # Step 7: Determine the appropriate Docker Compose file
     local docker_compose_file="docker-compose.yml"
     if [[ $(dpkg --print-architecture) == "arm64" ]]; then
         docker_compose_file="docker-compose.arm.yml"
         log_message "info" "Using ARM64-specific Docker compose file."
     fi
 
-    setup_docker "$docker_compose_file"
+    # Step 8: Start Docker Compose
+    setup_docker "$docker_compose_file" "./.env"
 
+    # Step 9: Generate and configure certificates
     local ip
     ip=$(hostname -I | awk '{print $1}')
     log_message "info" "Using IP address: $ip"
     generate_certificates "$ip"
 
+    # Step 10: Final message
     log_message "success" "Setup completed. Access the server at https://$ip:8443"
 }
 
