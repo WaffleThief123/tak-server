@@ -102,7 +102,7 @@ extract_release() {
 setup_docker() {
     local docker_compose_file="$1"
     log_message "info" "Starting Docker containers..."
-    docker-compose --file "$docker_compose_file" up --force-recreate -d || {
+    docker compose --file "$docker_compose_file" up --force-recreate -d || {
         log_message "danger" "Docker setup failed."
         exit 1
     }
