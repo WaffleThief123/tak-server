@@ -118,10 +118,10 @@ create_env_file() {
     # Prompt user for environment variables
     log_message "info" "Creating environment variables file..."
 
-    read -p "Country (for cert generation). Default [US]: " country
-    read -p "State (for cert generation). Default [state]: " state
-    read -p "City (for cert generation). Default [city]: " city
-    read -p "Organizational Unit (for cert generation). Default [org]: " orgunit
+    read -rp "Country (for cert generation). Default [US]: " country
+    read -rp "State (for cert generation). Default [state]: " state
+    read -rp "City (for cert generation). Default [city]: " city
+    read -rp "Organizational Unit (for cert generation). Default [org]: " orgunit
 
     # Derive IP address
     ip=$(hostname -I | awk '{print $1}')
