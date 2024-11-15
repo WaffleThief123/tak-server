@@ -29,7 +29,7 @@ command_exists() {
 
 # Verify required commands
 verify_dependencies() {
-    local dependencies=("netstat" "sha1sum" "md5sum" "unzip")
+    local dependencies=("docker" "netstat" "sha1sum" "md5sum" "unzip" "openssl" "keytool" "dpkg" "zip")
     for cmd in "${dependencies[@]}"; do
         if ! command_exists "$cmd"; then
             log_message "danger" "Missing required command: $cmd. Please install it."
@@ -109,18 +109,60 @@ setup_docker() {
     log_message "success" "Docker containers are running."
 }
 
-# Generate certificates
 generate_certificates() {
     local ip="$1"
     local cert_dir="./tak/certs"
+    local country state city orgunit
+
     log_message "info" "Generating certificates..."
     cd "$cert_dir" || exit 1
-    ./makeRootCa.sh --ca-name CRFtakserver
-    ./makeCert.sh server "$ip"
-    ./makeCert.sh client admin
-    cd - || exit 1
-    log_message "success" "Certificates generated."
+
+    # Prompt user for certificate metadata
+    read -p "Country (for cert generation). Default [US]: " country
+    read -p "State (for cert generation). Default [state]: " state
+    read -p "City (for cert generation). Default [city]: " city
+    read -p "Organizational Unit (for cert generation). Default [org]: " orgunit
+
+    # Set defaults if inputs are empty
+    country="${country:-US}"
+    state="${state:-state}"
+    city="${city:-city}"
+    orgunit="${orgunit:-org}"
+
+    # Write values to .env file
+    log_message "info" "Creating .env file..."
+    cat <<EOF > .env
+COUNTRY=$country
+STATE=$state
+CITY=$city
+ORGANIZATIONAL_UNIT=$orgunit
+SERVER_IP=$ip
+EOF
+    log_message "success" ".env file created with the following contents:"
+    cat .env
+
+    # Generate Root CA, Server, and Client Certificates
+    ./makeRootCa.sh --ca-name CRFtakserver || { log_message "danger" "Failed to create Root CA."; exit 1; }
+    ./makeCert.sh server "$ip" || { log_message "danger" "Failed to create server certificate."; exit 1; }
+    ./makeCert.sh client admin || { log_message "danger" "Failed to create client certificate."; exit 1; }
+
+    # Generate Data Packages for Clients
+    cd ../../ || exit 1
+    ./scripts/certDP.sh "$ip" admin || { log_message "danger" "Failed to create certificate data package."; exit 1; }
+
+    # Update TAK Server Configuration
+    sed -i "s/takserver.jks/${ip}.jks/g" ./tak/CoreConfig.xml
+    docker compose exec tak bash -c "java -jar /opt/tak/utils/UserManager.jar certmod -A certs/files/admin.pem" || {
+        log_message "danger" "Failed to link certificates with TAK server."
+        exit 1
+    }
+
+    # Restart the Server
+    docker compose restart tak || { log_message "danger" "Failed to restart TAK server."; exit 1; }
+
+    log_message "success" "Certificates created and configured successfully."
 }
+
 
 # Main setup logic
 main() {
