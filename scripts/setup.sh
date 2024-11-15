@@ -111,21 +111,21 @@ setup_docker() {
     log_message "success" "Docker containers are running."
 }
 
+create_env_file() {
+    local env_file="./.env"
+    local country state city orgunit ip
 
-generate_certificates() {
-    local ip="$1"
-    local cert_dir="./tak/certs"
-    local env_file="./.env"  # Ensure .env is created in the current working directory
-    local country state city orgunit
+    # Prompt user for environment variables
+    log_message "info" "Creating environment variables file..."
 
-    log_message "info" "Generating certificates..."
-    cd "$cert_dir" || exit 1
-
-    # Prompt user for certificate metadata
     read -p "Country (for cert generation). Default [US]: " country
     read -p "State (for cert generation). Default [state]: " state
     read -p "City (for cert generation). Default [city]: " city
     read -p "Organizational Unit (for cert generation). Default [org]: " orgunit
+
+    # Derive IP address
+    ip=$(hostname -I | awk '{print $1}')
+    log_message "info" "Using detected IP address: $ip"
 
     # Set defaults if inputs are empty
     country="${country:-US}"
@@ -133,8 +133,7 @@ generate_certificates() {
     city="${city:-city}"
     orgunit="${orgunit:-org}"
 
-    # Write values to .env file in the current directory
-    log_message "info" "Creating .env file at $env_file..."
+    # Write values to the .env file
     cat <<EOF > "$env_file"
 COUNTRY=$country
 STATE=$state
@@ -142,8 +141,29 @@ CITY=$city
 ORGANIZATIONAL_UNIT=$orgunit
 SERVER_IP=$ip
 EOF
-    log_message "success" ".env file created with the following contents:"
+
+    log_message "success" ".env file created at $env_file with the following contents:"
     cat "$env_file"
+}
+
+generate_certificates() {
+    local ip="$1"
+    local cert_dir="./tak/certs"
+    local env_file="./.env"
+
+    # Source the .env file
+    if [ -f "$env_file" ]; then
+        log_message "info" "Loading environment variables from $env_file..."
+        source "$env_file"
+    else
+        log_message "danger" "Environment file $env_file not found. Certificates cannot be generated."
+        exit 1
+    fi
+
+    log_message "info" "Generating certificates using the following details:"
+    log_message "info" "Country: $COUNTRY, State: $STATE, City: $CITY, Org Unit: $ORGANIZATIONAL_UNIT, IP: $ip"
+
+    cd "$cert_dir" || exit 1
 
     # Generate Root CA, Server, and Client Certificates
     ./makeRootCa.sh --ca-name CRFtakserver || { log_message "danger" "Failed to create Root CA."; exit 1; }
@@ -156,13 +176,6 @@ EOF
 
     # Update TAK Server Configuration
     sed -i "s/takserver.jks/${ip}.jks/g" ./tak/CoreConfig.xml
-
-    # Start Docker containers using docker compose v2
-    docker compose --file docker-compose.yml up --force-recreate -d || {
-        log_message "danger" "Docker setup failed."
-        exit 1
-    }
-
     docker compose exec tak bash -c "java -jar /opt/tak/utils/UserManager.jar certmod -A certs/files/admin.pem" || {
         log_message "danger" "Failed to link certificates with TAK server."
         exit 1
@@ -175,8 +188,6 @@ EOF
 }
 
 
-# Main setup logic
-# Main setup logic
 main() {
     log_message "info" "Starting TAK server setup..."
 
@@ -189,7 +200,10 @@ main() {
     # Step 3: Cleanup existing setup
     cleanup_setup
 
-    # Step 4: Locate the release file
+    # Step 4: Create the .env file
+    create_env_file
+
+    # Step 5: Locate the release file
     log_message "info" "Looking for release file..."
     local release_file
     release_file=$(ls *-RELEASE-*.zip 2>/dev/null | head -n 1)
@@ -198,31 +212,31 @@ main() {
         exit 1
     fi
 
-    # Step 5: Verify checksums of the release file
+    # Step 6: Verify checksums of the release file
     verify_checksums
 
-    # Step 6: Extract the release file
+    # Step 7: Extract the release file
     extract_release "$release_file"
 
-    # Step 7: Determine the appropriate Docker Compose file
+    # Step 8: Determine the appropriate Docker Compose file
     local docker_compose_file="docker-compose.yml"
     if [[ $(dpkg --print-architecture) == "arm64" ]]; then
         docker_compose_file="docker-compose.arm.yml"
         log_message "info" "Using ARM64-specific Docker compose file."
     fi
 
-    # Step 8: Start Docker Compose
+    # Step 9: Start Docker Compose with .env
     setup_docker "$docker_compose_file" "./.env"
 
-    # Step 9: Generate and configure certificates
+    # Step 10: Generate and configure certificates
     local ip
     ip=$(hostname -I | awk '{print $1}')
-    log_message "info" "Using IP address: $ip"
     generate_certificates "$ip"
 
-    # Step 10: Final message
+    # Step 11: Final message
     log_message "success" "Setup completed. Access the server at https://$ip:8443"
 }
+
 
 # Run the script
 main "$@"
