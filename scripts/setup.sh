@@ -151,6 +151,20 @@ generate_certificates() {
     local cert_dir="./tak/certs"
     local max_retries=6
     local retry_count=0
+    local skip_root_cert=false
+
+    # Check if ca.pem exists and prompt for action
+    if [ -f "$cert_dir/ca.pem" ]; then
+        log_message "warning" "CA file '$cert_dir/ca.pem' already exists. You can skip generating the root CA or start fresh."
+        read -rp "Do you want to use the existing CA file and skip generating a new one? (y/n): " user_input
+        if [[ "$user_input" =~ ^[yY](es)?$ ]]; then
+            skip_root_cert=true
+            log_message "info" "Using existing CA file. Skipping root CA generation."
+        else
+            log_message "warning" "Generating a new root CA. Deleting the old CA file."
+            rm -f "$cert_dir/ca.pem" && log_message "success" "Old CA file deleted."
+        fi
+    fi
 
     log_message "info" "Starting certificate generation with retries for IP: $ip..."
 
@@ -158,13 +172,15 @@ generate_certificates() {
         sleep 10 # Let PG stderr messages conclude
         log_message "warning" "------------CERTIFICATE GENERATION ATTEMPT $(($retry_count + 1))--------------"
 
-        # Generate Root CA
-        docker compose exec tak bash -c "cd /opt/tak/certs && ./makeRootCa.sh --ca-name CRFtakserver" || {
-            log_message "danger" "Failed to generate Root CA. Retrying..."
-            ((retry_count++))
-            continue
-        }
-        log_message "success" "Root CA generated successfully."
+        # Generate Root CA (skip if chosen)
+        if [ "$skip_root_cert" = false ]; then
+            docker compose exec tak bash -c "cd /opt/tak/certs && ./makeRootCa.sh --ca-name CRFtakserver" || {
+                log_message "danger" "Failed to generate Root CA. Retrying..."
+                ((retry_count++))
+                continue
+            }
+            log_message "success" "Root CA generated successfully."
+        fi
 
         # Generate Server Certificate
         docker compose exec tak bash -c "cd /opt/tak/certs && ./makeCert.sh server $ip" || {
