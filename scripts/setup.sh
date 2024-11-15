@@ -112,6 +112,7 @@ setup_docker() {
 generate_certificates() {
     local ip="$1"
     local cert_dir="./tak/certs"
+    local env_file="./.env"  # Ensure .env is created in the current working directory
     local country state city orgunit
 
     log_message "info" "Generating certificates..."
@@ -129,9 +130,9 @@ generate_certificates() {
     city="${city:-city}"
     orgunit="${orgunit:-org}"
 
-    # Write values to .env file
-    log_message "info" "Creating .env file..."
-    cat <<EOF > .env
+    # Write values to .env file in the current directory
+    log_message "info" "Creating .env file at $env_file..."
+    cat <<EOF > "$env_file"
 COUNTRY=$country
 STATE=$state
 CITY=$city
@@ -139,7 +140,7 @@ ORGANIZATIONAL_UNIT=$orgunit
 SERVER_IP=$ip
 EOF
     log_message "success" ".env file created with the following contents:"
-    cat .env
+    cat "$env_file"
 
     # Generate Root CA, Server, and Client Certificates
     ./makeRootCa.sh --ca-name CRFtakserver || { log_message "danger" "Failed to create Root CA."; exit 1; }
@@ -152,6 +153,13 @@ EOF
 
     # Update TAK Server Configuration
     sed -i "s/takserver.jks/${ip}.jks/g" ./tak/CoreConfig.xml
+
+    # Start Docker containers using docker compose v2
+    docker compose --file docker-compose.yml up --force-recreate -d || {
+        log_message "danger" "Docker setup failed."
+        exit 1
+    }
+
     docker compose exec tak bash -c "java -jar /opt/tak/utils/UserManager.jar certmod -A certs/files/admin.pem" || {
         log_message "danger" "Failed to link certificates with TAK server."
         exit 1
@@ -162,6 +170,8 @@ EOF
 
     log_message "success" "Certificates created and configured successfully."
 }
+
+
 
 
 # Main setup logic
