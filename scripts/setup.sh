@@ -29,7 +29,7 @@ command_exists() {
 
 # Verify required commands
 verify_dependencies() {
-    local dependencies=("docker compose" "netstat" "sha1sum" "md5sum" "unzip")
+    local dependencies=("netstat" "sha1sum" "md5sum" "unzip")
     for cmd in "${dependencies[@]}"; do
         if ! command_exists "$cmd"; then
             log_message "danger" "Missing required command: $cmd. Please install it."
