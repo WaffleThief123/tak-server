@@ -198,14 +198,6 @@ generate_certificates() {
         }
         log_message "success" "Client certificate for admin generated successfully."
 
-        # Set Permissions for Certificates
-        docker compose exec tak bash -c "useradd $USER && chown -R $USER:$USER /opt/tak/certs/" || {
-            log_message "danger" "Failed to set permissions for certificates. Retrying..."
-            ((retry_count++))
-            continue
-        }
-        log_message "success" "Certificate permissions set successfully."
-
         # Stop TAK container after successful certificate setup
         docker compose stop tak || {
             log_message "danger" "Failed to stop TAK container. Retrying..."
