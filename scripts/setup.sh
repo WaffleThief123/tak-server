@@ -149,43 +149,68 @@ EOF
 generate_certificates() {
     local ip="$1"
     local cert_dir="./tak/certs"
-    local env_file="./.env"
+    local max_retries=6
+    local retry_count=0
 
-    # Source the .env file
-    if [ -f "$env_file" ]; then
-        log_message "info" "Loading environment variables from $env_file..."
-        source "$env_file"
-    else
-        log_message "danger" "Environment file $env_file not found. Certificates cannot be generated."
+    log_message "info" "Starting certificate generation with retries for IP: $ip..."
+
+    while ((retry_count < max_retries)); do
+        sleep 10 # Let PG stderr messages conclude
+        log_message "warning" "------------CERTIFICATE GENERATION ATTEMPT $(($retry_count + 1))--------------"
+
+        # Generate Root CA
+        docker compose exec tak bash -c "cd /opt/tak/certs && ./makeRootCa.sh --ca-name CRFtakserver" || {
+            log_message "danger" "Failed to generate Root CA. Retrying..."
+            ((retry_count++))
+            continue
+        }
+        log_message "success" "Root CA generated successfully."
+
+        # Generate Server Certificate
+        docker compose exec tak bash -c "cd /opt/tak/certs && ./makeCert.sh server $ip" || {
+            log_message "danger" "Failed to generate server certificate for $ip. Retrying..."
+            ((retry_count++))
+            continue
+        }
+        log_message "success" "Server certificate for $ip generated successfully."
+
+        # Generate Client Certificate
+        docker compose exec tak bash -c "cd /opt/tak/certs && ./makeCert.sh client admin" || {
+            log_message "danger" "Failed to generate client certificate for admin. Retrying..."
+            ((retry_count++))
+            continue
+        }
+        log_message "success" "Client certificate for admin generated successfully."
+
+        # Set Permissions for Certificates
+        docker compose exec tak bash -c "useradd $USER && chown -R $USER:$USER /opt/tak/certs/" || {
+            log_message "danger" "Failed to set permissions for certificates. Retrying..."
+            ((retry_count++))
+            continue
+        }
+        log_message "success" "Certificate permissions set successfully."
+
+        # Stop TAK container after successful certificate setup
+        docker compose stop tak || {
+            log_message "danger" "Failed to stop TAK container. Retrying..."
+            ((retry_count++))
+            continue
+        }
+        log_message "success" "TAK container stopped successfully."
+
+        # Break out of loop on success
+        break
+    done
+
+    # Check if maximum retries were exhausted
+    if ((retry_count == max_retries)); then
+        log_message "danger" "Certificate generation failed after $max_retries attempts."
         exit 1
     fi
 
-    log_message "info" "Generating certificates using the following details:"
-    log_message "info" "Country: $COUNTRY, State: $STATE, City: $CITY, Org Unit: $ORGANIZATIONAL_UNIT, IP: $ip"
-
-    cd "$cert_dir" || exit 1
-
-    # Generate Root CA, Server, and Client Certificates
-    ./makeRootCa.sh --ca-name CRFtakserver || { log_message "danger" "Failed to create Root CA."; exit 1; }
-    ./makeCert.sh server "$ip" || { log_message "danger" "Failed to create server certificate."; exit 1; }
-    ./makeCert.sh client admin || { log_message "danger" "Failed to create client certificate."; exit 1; }
-
-    # Generate Data Packages for Clients
-    cd ../../ || exit 1
-    ./scripts/certDP.sh "$ip" admin || { log_message "danger" "Failed to create certificate data package."; exit 1; }
-
-    # Update TAK Server Configuration
-    sed -i "s/takserver.jks/${ip}.jks/g" ./tak/CoreConfig.xml
-    docker compose exec tak bash -c "java -jar /opt/tak/utils/UserManager.jar certmod -A certs/files/admin.pem" || {
-        log_message "danger" "Failed to link certificates with TAK server."
-        exit 1
-    }
-
-    # Restart the Server
-    docker compose restart tak || { log_message "danger" "Failed to restart TAK server."; exit 1; }
-
-    log_message "success" "Certificates created and configured successfully."
+    log_message "success" "Certificate generation and configuration completed successfully."
 }
+
 
 
 main() {
